@@ -136,14 +136,43 @@ function createCommandRunner(bot, options = {}) {
   function nearestEntityByName(name) {
     const normalized = normalizeName(name);
 
-    return bot.nearestEntity((entity) => {
+    const result = bot.nearestEntity((entity) => {
       if (entity === bot.entity) return false;
       if (!entity.position) return false;
+      
+      // We only care about mobs and players for these commands
       if (entity.type !== 'mob' && entity.type !== 'player') return false;
 
-      const entityName = normalizeName(entity.name || entity.displayName || entity.username || '');
-      return normalized === 'nearest' || entityName === normalized;
+      // 1. Check generic keywords
+      if (normalized === 'nearest') return true;
+      if (normalized === 'mob' && entity.type === 'mob') return true;
+      if (normalized === 'player' && entity.type === 'player') return true;
+
+      // 2. Check all possible name fields
+      const candidates = [
+        entity.name,
+        entity.displayName,
+        entity.username,
+        entity.kind,
+        entity.mobType
+      ].filter(Boolean).map(normalizeName);
+
+      // Match exactly or if the search term is a substring (e.g. "zomb" matches "zombie")
+      return candidates.some(c => c === normalized || c.includes(normalized));
     });
+
+    if (!result) {
+      // Diagnostic logging to the console
+      const nearby = Object.values(bot.entities)
+        .filter(e => e !== bot.entity && e.position && (e.type === 'mob' || e.type === 'player'))
+        .map(e => `${e.name || e.displayName || 'unknown'} (${e.type})`)
+        .slice(0, 10)
+        .join(', ');
+      
+      console.log(`[Search] No match for "${normalized}". Found nearby: ${nearby || 'nothing'}`);
+    }
+
+    return result;
   }
 
   async function commandHelp(username, reply) {
@@ -369,7 +398,10 @@ function createCommandRunner(bot, options = {}) {
     if (args.length < 1) throw new Error('Usage: attack mob_name_or_nearest');
 
     const target = nearestEntityByName(args[0]);
-    if (!target) throw new Error(`No nearby ${args[0]} found.`);
+    if (!target) {
+      const type = args[0].toLowerCase() === 'mob' ? 'mob' : `"${args[0]}"`;
+      throw new Error(`No nearby ${type} found. Try "!bot status" to check if I see anything.`);
+    }
 
     setActiveTask(`attack ${target.name || args[0]}`, stopPathing);
     bot.pathfinder.setGoal(new GoalFollow(target, 2), true);
