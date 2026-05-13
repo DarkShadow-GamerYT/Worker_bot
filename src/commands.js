@@ -48,7 +48,69 @@ function createCommandRunner(bot, options = {}) {
     movements: null
   };
 
-  function onSpawn() {
+  async function autoEquipArmor() {
+    const armorSlots = {
+      helmet: 'head',
+      chestplate: 'torso',
+      leggings: 'legs',
+      boots: 'feet'
+    };
+    
+    const items = bot.inventory.items();
+    const tiers = ['netherite', 'diamond', 'iron', 'golden', 'chainmail', 'leather'];
+
+    for (const [nameMatch, slot] of Object.entries(armorSlots)) {
+      const candidates = items.filter(i => i.name.includes(nameMatch));
+      if (candidates.length === 0) continue;
+
+      // Sort by tier (lower index is better)
+      candidates.sort((a, b) => {
+        const aTier = tiers.findIndex(t => a.name.includes(t));
+        const bTier = tiers.findIndex(t => b.name.includes(t));
+        return (aTier === -1 ? 99 : aTier) - (bTier === -1 ? 99 : bTier);
+      });
+
+      const best = candidates[0];
+      const currentlyEquipped = bot.inventory.slots[bot.getEquipmentDestSlot(slot)];
+      
+      if (!currentlyEquipped || currentlyEquipped.name !== best.name) {
+        await bot.equip(best, slot).catch(() => {});
+      }
+    }
+  }
+
+  async function autoEquipWeapon() {
+    const items = bot.inventory.items();
+    // Swords are preferred, then axes
+    const weapons = ['sword', 'axe'];
+    const tiers = ['netherite', 'diamond', 'iron', 'golden', 'stone', 'wooden'];
+
+    const candidates = items.filter(i => weapons.some(w => i.name.includes(w)));
+    if (candidates.length === 0) return;
+
+    candidates.sort((a, b) => {
+      const aTier = tiers.findIndex(t => a.name.includes(t));
+      const bTier = tiers.findIndex(t => b.name.includes(t));
+      
+      if (aTier !== bTier) return (aTier === -1 ? 99 : aTier) - (bTier === -1 ? 99 : bTier);
+      
+      // If same tier, prefer sword over axe
+      const aIsSword = a.name.includes('sword');
+      const bIsSword = b.name.includes('sword');
+      if (aIsSword !== bIsSword) return aIsSword ? -1 : 1;
+      
+      return 0;
+    });
+
+    const best = candidates[0];
+    const inHand = bot.inventory.slots[bot.getEquipmentDestSlot('hand')];
+    
+    if (!inHand || inHand.name !== best.name) {
+      await bot.equip(best, 'hand').catch(() => {});
+    }
+  }
+
+  async function onSpawn() {
     state.mcData = mcDataLoader(bot.version);
     state.movements = new Movements(bot, state.mcData);
     state.movements.canDig = Boolean(options.pathfinderCanDig);
@@ -57,6 +119,9 @@ function createCommandRunner(bot, options = {}) {
     
     bot.pathfinder.setMovements(state.movements);
     bot.pathfinder.thinkTimeout = 10000; // 10 seconds timeout for pathfinding
+    
+    // Auto-armor on spawn
+    autoEquipArmor().catch(() => {});
   }
 
   function ensureReady() {
@@ -283,6 +348,8 @@ function createCommandRunner(bot, options = {}) {
 
     if (blocks.length === 0) throw new Error(`No nearby ${blockType.name} found within 64 blocks.`);
 
+    await autoEquipArmor().catch(() => {});
+    
     const hasPickaxe = bot.inventory.items().some(item => item.name.includes('pickaxe'));
     if (!hasPickaxe) {
       await reply(username, "Warning: I don't have a pickaxe in my inventory. I'll try to mine with my hands, but it will be very slow!");
@@ -455,6 +522,9 @@ function createCommandRunner(bot, options = {}) {
       throw new Error(`I can't see any nearby ${type}. Check my "!bot status" to see if I detect anything.`);
     }
 
+    await autoEquipArmor().catch(() => {});
+    await autoEquipWeapon().catch(() => {});
+
     setActiveTask(`attack ${target.name || args[0]}`, stopPathing);
 
     try {
@@ -530,6 +600,12 @@ function createCommandRunner(bot, options = {}) {
         return commandPlace(username, args, reply);
       case 'equip':
       case 'hold':
+        if (args[0] === 'best') {
+          await autoEquipArmor();
+          await autoEquipWeapon();
+          await reply(username, "Equipped my best gear!");
+          return undefined;
+        }
         return commandEquip(username, args, reply);
       case 'inventory':
       case 'inv':
