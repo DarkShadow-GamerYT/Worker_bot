@@ -8,12 +8,11 @@ const { config, validateConfig } = require('./config');
 const { createCommandRunner, parseArgs } = require('./commands');
 const { startHealthServer } = require('./health');
 
-validateConfig();
-
 let reconnectTimer = null;
 let shuttingDown = false;
 let currentBot = null;
 let antiAfkTimer = null;
+
 const runtimeStatus = {
   startedAt: new Date().toISOString(),
   updatedAt: new Date().toISOString(),
@@ -34,6 +33,13 @@ function updateStatus(patch) {
   Object.assign(runtimeStatus, patch, {
     updatedAt: new Date().toISOString()
   });
+}
+
+try {
+  validateConfig();
+} catch (error) {
+  console.error('CONFIGURATION ERROR:', error.message);
+  updateStatus({ state: 'error', lastError: error.message });
 }
 
 function sleep(ms) {
@@ -257,4 +263,8 @@ function shutdown(signal) {
 process.on('SIGINT', () => shutdown('SIGINT'));
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 
-startBot();
+if (runtimeStatus.state !== 'error') {
+  startBot();
+} else {
+  console.warn('Bot will not start due to configuration errors. Please check your environment variables in Railway.');
+}
