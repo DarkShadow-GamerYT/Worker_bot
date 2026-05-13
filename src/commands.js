@@ -515,7 +515,7 @@ function createCommandRunner(bot, options = {}) {
   async function commandAttack(username, args, reply) {
     if (args.length < 1) throw new Error('Usage: attack mob_name_or_nearest');
 
-    const target = nearestEntityByName(args[0]);
+    let target = nearestEntityByName(args[0]);
     if (!target) {
       const targetName = args[0].toLowerCase();
       const type = targetName === 'mob' || targetName === 'hostile' ? 'mob' : `"${args[0]}"`;
@@ -536,14 +536,22 @@ function createCommandRunner(bot, options = {}) {
 
     state.attackTimer = setInterval(() => {
       try {
-        const stillThere = bot.entities[target.id];
+        let stillThere = bot.entities[target.id];
         if (!stillThere) {
-          clearActiveTask({ cancel: true });
-          return;
+          // Current target is gone, look for a new one of the same type/name
+          const nextTarget = nearestEntityByName(args[0]);
+          if (nextTarget) {
+            target = nextTarget;
+            stillThere = target;
+            bot.pathfinder.setGoal(new GoalFollow(target, 2), true).catch(() => {});
+          } else {
+            clearActiveTask({ cancel: true });
+            return;
+          }
         }
 
         if (!stillThere.position) {
-          return; // Wait for next tick if position is temporarily missing
+          return; // Wait for next tick
         }
 
         const distance = bot.entity.position.distanceTo(stillThere.position);
@@ -553,7 +561,6 @@ function createCommandRunner(bot, options = {}) {
             bot.attack(stillThere);
           } catch (err) {
             console.error('Bot attack error:', err);
-            // Don't necessarily stop, just log and try again next tick
           }
         }
       } catch (err) {
