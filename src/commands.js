@@ -50,9 +50,12 @@ function createCommandRunner(bot, options = {}) {
 
   function onSpawn() {
     state.mcData = mcDataLoader(bot.version);
-    state.movements = new Movements(bot, state.mcData);
     state.movements.canDig = Boolean(options.pathfinderCanDig);
+    state.movements.allowSprinting = true;
+    state.movements.allowParkour = true;
+    
     bot.pathfinder.setMovements(state.movements);
+    bot.pathfinder.thinkTimeout = 10000; // 10 seconds timeout for pathfinding
   }
 
   function ensureReady() {
@@ -266,11 +269,24 @@ function createCommandRunner(bot, options = {}) {
     });
     const blocks = positions.map((position) => bot.blockAt(position)).filter(Boolean);
 
-    if (blocks.length === 0) throw new Error(`No nearby ${blockType.name} found.`);
+    if (blocks.length === 0) throw new Error(`No nearby ${blockType.name} found within 64 blocks.`);
+
+    const hasPickaxe = bot.inventory.items().some(item => item.name.includes('pickaxe'));
+    if (!hasPickaxe) {
+      await reply(username, "Warning: I don't have a pickaxe in my inventory. I'll try to mine with my hands, but it will be very slow!");
+    }
 
     await reply(username, `Mining ${blocks.length} ${blockType.name}.`);
     await runTask(`mine ${blocks.length} ${blockType.name}`, reply, username, async () => {
-      await bot.collectBlock.collect(blocks.length === 1 ? blocks[0] : blocks);
+      // Temporarily increase timeout even more for mining tasks
+      const oldTimeout = bot.pathfinder.thinkTimeout;
+      bot.pathfinder.thinkTimeout = 20000;
+      
+      try {
+        await bot.collectBlock.collect(blocks.length === 1 ? blocks[0] : blocks);
+      } finally {
+        bot.pathfinder.thinkTimeout = oldTimeout;
+      }
     });
   }
 

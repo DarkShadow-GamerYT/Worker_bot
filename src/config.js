@@ -46,7 +46,7 @@ const config = {
   replyMode: optional(process.env.REPLY_MODE) || 'chat',
   autoReconnect: parseBoolean(process.env.AUTO_RECONNECT, true),
   reconnectDelayMs: parseNumber(process.env.RECONNECT_DELAY_MS, 10000),
-  pathfinderCanDig: parseBoolean(process.env.PATHFINDER_CAN_DIG, false),
+  pathfinderCanDig: parseBoolean(process.env.PATHFINDER_CAN_DIG, true),
   onSpawnCommands: parseList(process.env.ON_SPAWN_COMMANDS, ';'),
   autoAcceptResourcePack: parseBoolean(process.env.AUTO_ACCEPT_RESOURCE_PACK, true),
   securityAuth: {
