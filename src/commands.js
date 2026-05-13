@@ -456,23 +456,39 @@ function createCommandRunner(bot, options = {}) {
     }
 
     setActiveTask(`attack ${target.name || args[0]}`, stopPathing);
-    bot.pathfinder.setGoal(new GoalFollow(target, 2), true);
+
+    try {
+      bot.pathfinder.setGoal(new GoalFollow(target, 2), true);
+    } catch (err) {
+      console.error('Pathfinder goal error:', err);
+      throw new Error("I couldn't start moving towards the target.");
+    }
 
     state.attackTimer = setInterval(() => {
-      const stillThere = bot.entities[target.id];
-      if (!stillThere) {
-        clearActiveTask({ cancel: true });
-        return;
-      }
-
-      const distance = bot.entity.position.distanceTo(stillThere.position);
-      if (distance <= 3.5) {
-        bot.lookAt(stillThere.position.offset(0, stillThere.height || 1, 0), true).catch(() => {});
-        try {
-          bot.attack(stillThere);
-        } catch {
+      try {
+        const stillThere = bot.entities[target.id];
+        if (!stillThere) {
           clearActiveTask({ cancel: true });
+          return;
         }
+
+        if (!stillThere.position) {
+          return; // Wait for next tick if position is temporarily missing
+        }
+
+        const distance = bot.entity.position.distanceTo(stillThere.position);
+        if (distance <= 3.5) {
+          bot.lookAt(stillThere.position.offset(0, stillThere.height || 1, 0), true).catch(() => {});
+          try {
+            bot.attack(stillThere);
+          } catch (err) {
+            console.error('Bot attack error:', err);
+            // Don't necessarily stop, just log and try again next tick
+          }
+        }
+      } catch (err) {
+        console.error('Attack loop internal error:', err);
+        clearActiveTask({ cancel: true });
       }
     }, 700);
 
