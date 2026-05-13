@@ -50,6 +50,7 @@ function createCommandRunner(bot, options = {}) {
 
   function onSpawn() {
     state.mcData = mcDataLoader(bot.version);
+    state.movements = new Movements(bot, state.mcData);
     state.movements.canDig = Boolean(options.pathfinderCanDig);
     state.movements.allowSprinting = true;
     state.movements.allowParkour = true;
