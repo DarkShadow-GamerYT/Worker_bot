@@ -147,6 +147,15 @@ function createCommandRunner(bot, options = {}) {
       
       const entityType = entity.type;
 
+      // EXCLUSIONS: Never target projectiles or non-living objects via generic keywords
+      const entityName = entity.name || '';
+      const isProjectile = ['arrow', 'trident', 'fireball', 'snowball', 'egg', 'potion', 'item', 'experience_orb'].includes(entityName);
+      
+      if (isMobKeyword) {
+        if (isProjectile) return false;
+        if (entityType === 'object' || entityType === 'orb' || entityType === 'other') return false;
+      }
+
       // 1. Generic keywords
       if (normalized === 'nearest') return entityType === 'mob' || entityType === 'player';
       if (normalized === 'player' && entityType === 'player') return true;
@@ -161,8 +170,9 @@ function createCommandRunner(bot, options = {}) {
         entity.objectType
       ].filter(Boolean).map(normalizeName);
 
-      // Specific name match (if requested name is found in any candidate field)
+      // Specific name match
       if (!isMobKeyword) {
+        // If a specific name is requested (e.g. "arrow"), allow it, but generally we want mobs
         return candidates.some((c) => c === normalized || c.includes(normalized));
       }
 
@@ -175,7 +185,8 @@ function createCommandRunner(bot, options = {}) {
       }
 
       // Some servers or versions might use these types
-      if (entityType === 'hostile' || entityType === 'passive' || entity.mobType || entity.kind === 'hostile') return true;
+      // Only match if it's not a known object type
+      if (entityType !== 'object' && (entityType === 'hostile' || entityType === 'passive' || entity.mobType || entity.kind === 'hostile')) return true;
 
       return false;
     });
