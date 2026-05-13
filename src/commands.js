@@ -135,41 +135,56 @@ function createCommandRunner(bot, options = {}) {
 
   function nearestEntityByName(name) {
     const normalized = normalizeName(name);
+    const isMobKeyword = ['mob', 'mobs', 'hostile', 'monster', 'monsters'].includes(normalized);
 
     const result = bot.nearestEntity((entity) => {
       if (entity === bot.entity) return false;
       if (!entity.position) return false;
       
-      // We only care about mobs and players for these commands
-      if (entity.type !== 'mob' && entity.type !== 'player') return false;
+      const entityType = entity.type;
 
-      // 1. Check generic keywords
-      if (normalized === 'nearest') return true;
-      if (normalized === 'mob' && entity.type === 'mob') return true;
-      if (normalized === 'player' && entity.type === 'player') return true;
+      // 1. Generic keywords
+      if (normalized === 'nearest') return entityType === 'mob' || entityType === 'player';
+      if (normalized === 'player' && entityType === 'player') return true;
 
-      // 2. Check all possible name fields
+      // 2. Identify the entity via properties
       const candidates = [
         entity.name,
         entity.displayName,
         entity.username,
         entity.kind,
-        entity.mobType
+        entity.mobType,
+        entity.objectType
       ].filter(Boolean).map(normalizeName);
 
-      // Match exactly or if the search term is a substring (e.g. "zomb" matches "zombie")
-      return candidates.some(c => c === normalized || c.includes(normalized));
+      // Specific name match (if requested name is found in any candidate field)
+      if (!isMobKeyword) {
+        return candidates.some((c) => c === normalized || c.includes(normalized));
+      }
+
+      // Mob keyword match logic
+      if (entityType === 'mob') return true;
+
+      // Fallback for mob keyword: check if it's a known mob in mcData
+      if (state.mcData && state.mcData.mobsByName) {
+        if (candidates.some((c) => state.mcData.mobsByName[c])) return true;
+      }
+
+      // Some servers or versions might use these types
+      if (entityType === 'hostile' || entityType === 'passive' || entity.mobType || entity.kind === 'hostile') return true;
+
+      return false;
     });
 
     if (!result) {
-      // Diagnostic logging to the console
+      // Diagnostic logging to help troubleshoot visibility issues
       const nearby = Object.values(bot.entities)
-        .filter(e => e !== bot.entity && e.position && (e.type === 'mob' || e.type === 'player'))
-        .map(e => `${e.name || e.displayName || 'unknown'} (${e.type})`)
-        .slice(0, 10)
+        .filter((e) => e !== bot.entity && e.position)
+        .slice(0, 15)
+        .map((e) => `${e.name || e.displayName || 'unknown'}:${e.type}`)
         .join(', ');
-      
-      console.log(`[Search] No match for "${normalized}". Found nearby: ${nearby || 'nothing'}`);
+
+      console.log(`[Search] No match for "${normalized}". Nearby entities: ${nearby || 'none'}`);
     }
 
     return result;
@@ -186,7 +201,15 @@ function createCommandRunner(bot, options = {}) {
     const position = formatPosition(bot.entity.position);
     const task = state.activeTask ? state.activeTask.name : 'idle';
     const invCount = bot.inventory.items().length;
-    await reply(username, `Health ${Math.round(bot.health)}/20, food ${bot.food}/20, pos ${position}, inv ${invCount}, task ${task}`);
+
+    // Count visible mobs and players specifically
+    const mobs = Object.values(bot.entities).filter((e) => e.type === 'mob').length;
+    const players = Object.values(bot.entities).filter((e) => e.type === 'player').length;
+
+    await reply(
+      username,
+      `Health ${Math.round(bot.health)}/20, food ${bot.food}/20, pos ${position}, inv ${invCount}, mobs ${mobs}, players ${players}, task ${task}`
+    );
   }
 
   async function commandCome(username, reply) {
@@ -399,8 +422,9 @@ function createCommandRunner(bot, options = {}) {
 
     const target = nearestEntityByName(args[0]);
     if (!target) {
-      const type = args[0].toLowerCase() === 'mob' ? 'mob' : `"${args[0]}"`;
-      throw new Error(`No nearby ${type} found. Try "!bot status" to check if I see anything.`);
+      const targetName = args[0].toLowerCase();
+      const type = targetName === 'mob' || targetName === 'hostile' ? 'mob' : `"${args[0]}"`;
+      throw new Error(`I can't see any nearby ${type}. Check my "!bot status" to see if I detect anything.`);
     }
 
     setActiveTask(`attack ${target.name || args[0]}`, stopPathing);
