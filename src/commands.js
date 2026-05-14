@@ -454,20 +454,26 @@ function createCommandRunner(bot, options = {}) {
       bot.pathfinder.setMovements(state.movements);
       
       try {
-        if (GoalPlaceBlock) {
-          await bot.pathfinder.goto(new GoalPlaceBlock(targetPosition, bot.world, { range: 3 }));
-        } else {
-          await bot.pathfinder.goto(new GoalNear(targetPosition.x, targetPosition.y, targetPosition.z, 3));
-        }
+        // GoalPlaceBlock can cause infinite jumping loops if it computes an unreachable vantage point.
+        // GoalNear gets us close enough to place it manually.
+        await bot.pathfinder.goto(new GoalNear(targetPosition.x, targetPosition.y, targetPosition.z, 3));
       } catch (err) {
         console.error('Pathfinder error while placing:', err);
       }
       
+      // Forcefully stop any residual pathfinding movements (like jumping)
+      if (bot.pathfinder.isMoving && bot.pathfinder.isMoving()) {
+        bot.pathfinder.stop();
+      } else if (bot.pathfinder.setGoal) {
+        bot.pathfinder.setGoal(null);
+      }
+      bot.clearControlStates();
+      
       // Ensure we aren't standing perfectly inside the block
       const dist = bot.entity.position.distanceTo(targetPosition.offset(0.5, 0.5, 0.5));
-      if (dist < 1.2) {
+      if (dist < 1.5) {
          bot.setControlState('back', true);
-         await sleep(300);
+         await sleep(400); // Back up a bit more to ensure clearance
          bot.setControlState('back', false);
       }
       
