@@ -209,6 +209,7 @@ function createCommandRunner(bot, options = {}) {
     const result = bot.nearestEntity((entity) => {
       if (entity === bot.entity) return false;
       if (!entity.position) return false;
+      if (!entity.isValid) return false;
       
       const entityType = entity.type;
 
@@ -527,6 +528,7 @@ function createCommandRunner(bot, options = {}) {
 
     setActiveTask(`attack ${target.name || args[0]}`, stopPathing);
 
+    bot.pathfinder.setMovements(state.movements);
     try {
       bot.pathfinder.setGoal(new GoalFollow(target, 2), true);
     } catch (err) {
@@ -537,12 +539,13 @@ function createCommandRunner(bot, options = {}) {
     state.attackTimer = setInterval(() => {
       try {
         let stillThere = bot.entities[target.id];
-        if (!stillThere) {
+        if (!stillThere || !stillThere.isValid) {
           // Current target is gone, look for a new one of the same type/name
           const nextTarget = nearestEntityByName(args[0]);
           if (nextTarget) {
             target = nextTarget;
             stillThere = target;
+            bot.pathfinder.setMovements(state.movements);
             bot.pathfinder.setGoal(new GoalFollow(target, 2), true).catch(() => {});
           } else {
             clearActiveTask({ cancel: true });
