@@ -4,7 +4,7 @@ const mcDataLoader = require('minecraft-data');
 const { Movements, goals } = require('mineflayer-pathfinder');
 const { Vec3 } = require('vec3');
 
-const { GoalFollow, GoalNear } = goals;
+const { GoalFollow, GoalNear, GoalPlaceBlock } = goals;
 
 function parseArgs(input) {
   const args = [];
@@ -300,6 +300,7 @@ function createCommandRunner(bot, options = {}) {
     const position = target.position;
     await reply(username, `Coming to ${formatPosition(position)}.`);
     await runTask(`come to ${username}`, reply, username, async () => {
+      bot.pathfinder.setMovements(state.movements);
       await bot.pathfinder.goto(new GoalNear(position.x, position.y, position.z, 1));
     });
   }
@@ -329,6 +330,7 @@ function createCommandRunner(bot, options = {}) {
 
     await reply(username, `Going to ${x} ${y} ${z}.`);
     await runTask(`goto ${x} ${y} ${z}`, reply, username, async () => {
+      bot.pathfinder.setMovements(state.movements);
       await bot.pathfinder.goto(new GoalNear(x, y, z, 1));
     });
   }
@@ -449,13 +451,35 @@ function createCommandRunner(bot, options = {}) {
 
     await reply(username, `Placing ${item.name} at ${formatPosition(targetPosition)}.`);
     await runTask(`place ${item.name}`, reply, username, async () => {
-      // Find a spot to stand that isn't the target position
-      const standPos = targetPosition.offset(2, 0, 0); 
-      await bot.pathfinder.goto(new GoalNear(standPos.x, standPos.y, standPos.z, 2));
+      bot.pathfinder.setMovements(state.movements);
+      
+      try {
+        if (GoalPlaceBlock) {
+          await bot.pathfinder.goto(new GoalPlaceBlock(targetPosition, bot.world, { range: 3 }));
+        } else {
+          await bot.pathfinder.goto(new GoalNear(targetPosition.x, targetPosition.y, targetPosition.z, 3));
+        }
+      } catch (err) {
+        console.error('Pathfinder error while placing:', err);
+      }
+      
+      // Ensure we aren't standing perfectly inside the block
+      const dist = bot.entity.position.distanceTo(targetPosition.offset(0.5, 0.5, 0.5));
+      if (dist < 1.2) {
+         bot.setControlState('back', true);
+         await sleep(300);
+         bot.setControlState('back', false);
+      }
       
       await bot.equip(item, 'hand');
       await bot.lookAt(targetPosition.offset(0.5, 0.5, 0.5), true);
-      await bot.placeBlock(referenceBlock, face);
+      
+      try {
+        await bot.placeBlock(referenceBlock, face);
+      } catch (err) {
+        console.error('Bot place block error:', err);
+        throw new Error("I couldn't place the block. Am I too close or is it blocked?");
+      }
     });
   }
 
