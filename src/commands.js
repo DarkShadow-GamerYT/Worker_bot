@@ -453,18 +453,23 @@ function createCommandRunner(bot, options = {}) {
     await runTask(`place ${item.name}`, reply, username, async () => {
       bot.pathfinder.setMovements(state.movements);
       
-      try {
-        // GoalPlaceBlock can cause infinite jumping loops if it computes an unreachable vantage point.
-        // GoalNear gets us close enough to place it manually.
-        await bot.pathfinder.goto(new GoalNear(targetPosition.x, targetPosition.y, targetPosition.z, 3));
-      } catch (err) {
-        console.error('Pathfinder error while placing:', err);
+      const distance = bot.entity.position.distanceTo(targetPosition);
+      
+      // Only pathfind if we are too far away
+      if (distance > 4) {
+        try {
+          // Add a strict 10-second timeout to pathfinding to prevent 2-3 minute jumping loops
+          await Promise.race([
+            bot.pathfinder.goto(new GoalNear(targetPosition.x, targetPosition.y, targetPosition.z, 3)),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('Pathfinding timeout')), 10000))
+          ]);
+        } catch (err) {
+          console.error('Pathfinder timeout/error while placing:', err.message);
+        }
       }
       
-      // Forcefully stop any residual pathfinding movements (like jumping)
-      if (bot.pathfinder.isMoving && bot.pathfinder.isMoving()) {
-        bot.pathfinder.stop();
-      } else if (bot.pathfinder.setGoal) {
+      // Forcefully stop any residual pathfinding movements
+      if (bot.pathfinder.setGoal) {
         bot.pathfinder.setGoal(null);
       }
       bot.clearControlStates();
@@ -473,17 +478,37 @@ function createCommandRunner(bot, options = {}) {
       const dist = bot.entity.position.distanceTo(targetPosition.offset(0.5, 0.5, 0.5));
       if (dist < 1.5) {
          bot.setControlState('back', true);
-         await sleep(400); // Back up a bit more to ensure clearance
+         await sleep(500); 
          bot.setControlState('back', false);
       }
       
       await bot.equip(item, 'hand');
       await bot.lookAt(targetPosition.offset(0.5, 0.5, 0.5), true);
       
+      // Brief delay for server to register rotation
+      await sleep(100);
+      
       try {
-        await bot.placeBlock(referenceBlock, face);
+        await Promise.race([
+          bot.placeBlock(referenceBlock, face),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('Server ignored placement')), 5000))
+        ]);
       } catch (err) {
-        console.error('Bot place block error:', err);
+        console.error('Bot place block error:', err.message);
+        
+        // Final fallback: try to jump and place if the block is elevated
+        if (targetPosition.y > bot.entity.position.y) {
+          bot.setControlState('jump', true);
+          await sleep(250);
+          bot.setControlState('jump', false);
+          try {
+            await bot.placeBlock(referenceBlock, face);
+            return; // succeeded on second try
+          } catch (e) {
+            // ignore inner error
+          }
+        }
+        
         throw new Error("I couldn't place the block. Am I too close or is it blocked?");
       }
     });
