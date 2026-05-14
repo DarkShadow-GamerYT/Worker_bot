@@ -12,6 +12,7 @@ let reconnectTimer = null;
 let shuttingDown = false;
 let currentBot = null;
 let antiAfkTimer = null;
+let donationTimer = null;
 
 const runtimeStatus = {
   startedAt: new Date().toISOString(),
@@ -243,6 +244,13 @@ function startBot() {
       }, 500);
     }, config.antiAfk.intervalMs);
   }
+
+  if (donationTimer) clearInterval(donationTimer);
+  donationTimer = setInterval(() => {
+    if (currentBot === bot && bot.entity) {
+      bot.chat('If you find this bot helpful, please consider donating to the developer!');
+    }
+  }, 60 * 60 * 1000); // 1 hour
 }
 
 function shutdown(signal) {
@@ -250,6 +258,7 @@ function shutdown(signal) {
   shuttingDown = true;
   if (reconnectTimer) clearTimeout(reconnectTimer);
   if (antiAfkTimer) clearInterval(antiAfkTimer);
+  if (donationTimer) clearInterval(donationTimer);
 
   if (currentBot) {
     currentBot.quit('Bot shutting down');
