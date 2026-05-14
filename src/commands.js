@@ -339,15 +339,7 @@ function createCommandRunner(bot, options = {}) {
     const blockType = blockByName(args[0]);
     if (!blockType) throw new Error(`Unknown block: ${args[0]}`);
 
-    const count = toCount(args[1], 1, 128);
-    const positions = bot.findBlocks({
-      matching: blockType.id,
-      maxDistance: 64,
-      count
-    });
-    const blocks = positions.map((position) => bot.blockAt(position)).filter(Boolean);
-
-    if (blocks.length === 0) throw new Error(`No nearby ${blockType.name} found within 64 blocks.`);
+    const targetCount = toCount(args[1], 1, 128);
 
     await autoEquipArmor().catch(() => {});
     
@@ -356,14 +348,66 @@ function createCommandRunner(bot, options = {}) {
       await reply(username, "Warning: I don't have a pickaxe in my inventory. I'll try to mine with my hands, but it will be very slow!");
     }
 
-    await reply(username, `Mining ${blocks.length} ${blockType.name}.`);
-    await runTask(`mine ${blocks.length} ${blockType.name}`, reply, username, async () => {
-      // Temporarily increase timeout even more for mining tasks
+    await reply(username, `Attempting to mine ${targetCount} ${blockType.name}.`);
+    await runTask(`mine ${targetCount} ${blockType.name}`, reply, username, async () => {
       const oldTimeout = bot.pathfinder.thinkTimeout;
-      bot.pathfinder.thinkTimeout = 20000;
+      bot.pathfinder.thinkTimeout = 30000; // Increased timeout for difficult paths
+      bot.pathfinder.setMovements(state.movements); // Ensure movements are applied
+      
+      let collectedCount = 0;
+      const blacklist = new Set();
+      let consecutiveFailures = 0;
+      const taskName = `mine ${targetCount} ${blockType.name}`;
       
       try {
-        await bot.collectBlock.collect(blocks.length === 1 ? blocks[0] : blocks);
+        while (collectedCount < targetCount) {
+          // Check if task was stopped
+          if (!state.activeTask || state.activeTask.name !== taskName) {
+            break;
+          }
+
+          const positions = bot.findBlocks({
+            matching: blockType.id,
+            maxDistance: 64,
+            count: 32 // Find multiple candidates
+          });
+          
+          const validPositions = positions.filter(pos => !blacklist.has(pos.toString()));
+          
+          if (validPositions.length === 0) {
+            if (collectedCount > 0) {
+              await reply(username, `I couldn't find any more reachable ${blockType.name} nearby. Stopping early. I collected ${collectedCount}.`);
+            } else {
+              await reply(username, `I couldn't reach any ${blockType.name} nearby.`);
+            }
+            break;
+          }
+          
+          // Sort by distance from bot
+          validPositions.sort((a, b) => bot.entity.position.distanceTo(a) - bot.entity.position.distanceTo(b));
+          const targetBlock = bot.blockAt(validPositions[0]);
+          
+          if (!targetBlock) {
+             blacklist.add(validPositions[0].toString());
+             continue;
+          }
+          
+          try {
+            await bot.collectBlock.collect(targetBlock);
+            collectedCount++;
+            consecutiveFailures = 0;
+            await sleep(300); // Wait briefly for items to drop/be collected
+          } catch (err) {
+            console.log(`Failed to mine block at ${targetBlock.position}: ${err.message}`);
+            blacklist.add(targetBlock.position.toString());
+            consecutiveFailures++;
+            
+            if (consecutiveFailures >= 10) {
+              await reply(username, `I failed to reach blocks 10 times in a row. They seem inaccessible. Stopping early. I collected ${collectedCount}.`);
+              break;
+            }
+          }
+        }
       } finally {
         bot.pathfinder.thinkTimeout = oldTimeout;
       }
