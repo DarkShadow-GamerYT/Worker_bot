@@ -45,7 +45,8 @@ function createCommandRunner(bot, options = {}) {
     activeTask: null,
     attackTimer: null,
     mcData: null,
-    movements: null
+    movements: null,
+    autoAttackInterval: null
   };
 
   async function autoEquipArmor() {
@@ -122,6 +123,33 @@ function createCommandRunner(bot, options = {}) {
     
     // Auto-armor on spawn
     autoEquipArmor().catch(() => {});
+
+    // Auto-attack nearby mobs
+    if (!state.autoAttackInterval) {
+      state.autoAttackInterval = setInterval(() => {
+        // Do not auto-attack if currently performing a specific task that requires precision
+        if (state.activeTask && (state.activeTask.name.startsWith('mine') || state.activeTask.name.startsWith('place'))) return;
+        
+        const target = nearestEntityByName('mob');
+        if (target && bot.entity && target.position) {
+          const distance = bot.entity.position.distanceTo(target.position);
+          if (distance <= 4.0) {
+            autoEquipWeapon().catch(() => {});
+            bot.lookAt(target.position.offset(0, target.height || 1, 0), true).catch(() => {});
+            try {
+              bot.attack(target);
+            } catch (e) {}
+          }
+        }
+      }, 500);
+
+      bot.once('end', () => {
+        if (state.autoAttackInterval) {
+          clearInterval(state.autoAttackInterval);
+          state.autoAttackInterval = null;
+        }
+      });
+    }
   }
 
   function ensureReady() {
@@ -274,7 +302,7 @@ function createCommandRunner(bot, options = {}) {
   async function commandHelp(username, reply) {
     await reply(
       username,
-      'Commands: help, status, come, follow [player], stop, goto x y z, mine block [count], place block x y z, equip item [slot], inventory, drop item [count], craft item [count], sleep, wake, attack mob, say text'
+      'Commands: help, status, come, follow [player], stop, goto x y z, mine [count], place x y z, equip [slot], inv, drop [count], craft [count], sleep, wake, attack mob, say text, ride [entity], dismount'
     );
   }
 
@@ -478,15 +506,11 @@ function createCommandRunner(bot, options = {}) {
       const dist = bot.entity.position.distanceTo(targetPosition.offset(0.5, 0.5, 0.5));
       if (dist < 1.5) {
          bot.setControlState('back', true);
-         await sleep(500); 
-         bot.setControlState('back', false);
+         setTimeout(() => { bot.setControlState('back', false); }, 200); // Non-blocking
       }
       
       await bot.equip(item, 'hand');
       await bot.lookAt(targetPosition.offset(0.5, 0.5, 0.5), true);
-      
-      // Brief delay for server to register rotation
-      await sleep(100);
       
       try {
         await Promise.race([
@@ -680,6 +704,58 @@ function createCommandRunner(bot, options = {}) {
     await reply(username, 'Said it.');
   }
 
+  async function commandRide(username, args, reply) {
+    const targetName = args[0] || 'boat';
+    const normalized = normalizeName(targetName);
+    
+    const vehicle = bot.nearestEntity((entity) => {
+      if (entity === bot.entity) return false;
+      if (!entity.position) return false;
+      if (!entity.isValid) return false;
+      
+      const candidates = [
+        entity.name,
+        entity.displayName,
+        entity.kind,
+        entity.objectType
+      ].filter(Boolean).map(normalizeName);
+      
+      return candidates.some((c) => c === normalized || c.includes(normalized));
+    });
+
+    if (!vehicle) {
+      throw new Error(`I can't see any "${targetName}" nearby.`);
+    }
+
+    await reply(username, `Attempting to ride ${targetName}.`);
+    await runTask(`ride ${targetName}`, reply, username, async () => {
+      bot.pathfinder.setMovements(state.movements);
+      
+      const distance = bot.entity.position.distanceTo(vehicle.position);
+      if (distance > 3) {
+        try {
+          await Promise.race([
+            bot.pathfinder.goto(new GoalNear(vehicle.position.x, vehicle.position.y, vehicle.position.z, 2)),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('Pathfinding timeout')), 10000))
+          ]);
+        } catch (err) {
+          console.error('Pathfinder timeout/error while trying to ride:', err.message);
+        }
+      }
+
+      await bot.mount(vehicle);
+    });
+  }
+
+  async function commandDismount(username, reply) {
+    if (!bot.vehicle) {
+      throw new Error("I am not riding anything.");
+    }
+    
+    await reply(username, 'Dismounting.');
+    await bot.dismount();
+  }
+
   async function handle(username, commandName, args, reply) {
     ensureReady();
 
@@ -733,6 +809,13 @@ function createCommandRunner(bot, options = {}) {
         return commandAttack(username, args, reply);
       case 'say':
         return commandSay(username, args, reply);
+      case 'ride':
+      case 'mount':
+        return commandRide(username, args, reply);
+      case 'dismount':
+      case 'unmount':
+      case 'leave':
+        return commandDismount(username, reply);
       default:
         await reply(username, `Unknown command: ${commandName}. Try help.`);
         return undefined;
