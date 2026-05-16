@@ -111,6 +111,44 @@ function createCommandRunner(bot, options = {}) {
     }
   }
 
+  async function autoEquipBestTool(block) {
+    if (!block) return;
+    
+    const items = bot.inventory.items();
+    // Currently only handles pickaxes as that's the reported issue
+    const pickaxes = items.filter(i => i.name.includes('pickaxe'));
+    if (pickaxes.length === 0) return;
+
+    const tiers = ['netherite', 'diamond', 'iron', 'golden', 'stone', 'wooden'];
+    
+    pickaxes.sort((a, b) => {
+      const aTier = tiers.findIndex(t => a.name.includes(t));
+      const bTier = tiers.findIndex(t => b.name.includes(t));
+      
+      if (aTier !== bTier) return (aTier === -1 ? 99 : aTier) - (bTier === -1 ? 99 : bTier);
+      
+      // If same tier, prefer enchanted
+      const isEnchanted = (item) => {
+        if (!item.nbt || !item.nbt.value) return false;
+        const val = item.nbt.value;
+        return Boolean(val.ench || val.Enchantments || (val.components && val.components.value['minecraft:enchantments']));
+      };
+
+      const aEnch = isEnchanted(a) ? 1 : 0;
+      const bEnch = isEnchanted(b) ? 1 : 0;
+      
+      return bEnch - aEnch;
+    });
+
+    const best = pickaxes[0];
+    const inHand = bot.inventory.slots[bot.getEquipmentDestSlot('hand')];
+    
+    // Check if we already have the best one equipped (by slot to be sure it's the exact same item)
+    if (!inHand || inHand.name !== best.name || inHand.slot !== best.slot) {
+      await bot.equip(best, 'hand').catch(() => {});
+    }
+  }
+
   async function onSpawn() {
     state.mcData = mcDataLoader(bot.version);
     state.movements = new Movements(bot, state.mcData);
@@ -439,6 +477,7 @@ function createCommandRunner(bot, options = {}) {
           }
           
           try {
+            await autoEquipBestTool(targetBlock).catch(() => {});
             await bot.collectBlock.collect(targetBlock);
             collectedCount++;
             consecutiveFailures = 0;
