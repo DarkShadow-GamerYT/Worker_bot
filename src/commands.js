@@ -402,7 +402,25 @@ function createCommandRunner(bot, options = {}) {
             count: 32 // Find multiple candidates
           });
           
-          const validPositions = positions.filter(pos => !blacklist.has(pos.toString()));
+          const validPositions = positions.filter(pos => {
+            if (blacklist.has(pos.toString())) return false;
+            
+            // Danger check: don't mine blocks adjacent to lava
+            const offsets = [
+              [0, 1, 0], [0, -1, 0],
+              [1, 0, 0], [-1, 0, 0],
+              [0, 0, 1], [0, 0, -1]
+            ];
+            
+            for (const [dx, dy, dz] of offsets) {
+              const adjacent = bot.blockAt(pos.offset(dx, dy, dz));
+              if (adjacent && adjacent.name.includes('lava')) {
+                blacklist.add(pos.toString());
+                return false;
+              }
+            }
+            return true;
+          });
           
           if (validPositions.length === 0) {
             if (collectedCount > 0) {
