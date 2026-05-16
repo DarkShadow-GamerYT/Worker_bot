@@ -137,7 +137,6 @@ function startBot() {
   const bot = mineflayer.createBot(createBotOptions());
   currentBot = bot;
   bot.loadPlugin(pathfinder);
-  bot.loadPlugin(tool);
   bot.loadPlugin(collectBlock);
 
   const commandRunner = createCommandRunner(bot, {
