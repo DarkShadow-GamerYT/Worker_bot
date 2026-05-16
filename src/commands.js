@@ -117,6 +117,8 @@ function createCommandRunner(bot, options = {}) {
     const items = bot.inventory.items();
     // Currently only handles pickaxes as that's the reported issue
     const pickaxes = items.filter(i => i.name.includes('pickaxe'));
+    console.log(`[Debug] Found ${pickaxes.length} pickaxes in inventory: ${pickaxes.map(p => p.name).join(', ')}`);
+    
     if (pickaxes.length === 0) return;
 
     const tiers = ['netherite', 'diamond', 'iron', 'golden', 'stone', 'wooden'];
@@ -129,6 +131,13 @@ function createCommandRunner(bot, options = {}) {
       
       // If same tier, prefer enchanted
       const isEnchanted = (item) => {
+        // Detailed logging for NBT structure
+        if (item.nbt) {
+          console.log(`[Debug] Item ${item.name} has NBT. Keys: ${Object.keys(item.nbt.value || {}).join(', ')}`);
+        } else {
+          console.log(`[Debug] Item ${item.name} has no NBT`);
+        }
+
         if (!item.nbt || !item.nbt.value) return false;
         const val = item.nbt.value;
         return Boolean(val.ench || val.Enchantments || (val.components && val.components.value['minecraft:enchantments']));
@@ -141,11 +150,19 @@ function createCommandRunner(bot, options = {}) {
     });
 
     const best = pickaxes[0];
+    console.log(`[Debug] Choosing best tool: ${best.name} (slot: ${best.slot})`);
+    
     const inHand = bot.inventory.slots[bot.getEquipmentDestSlot('hand')];
+    if (inHand) console.log(`[Debug] Currently in hand: ${inHand.name} (slot: ${inHand.slot})`);
     
     // Check if we already have the best one equipped (by slot to be sure it's the exact same item)
     if (!inHand || inHand.name !== best.name || inHand.slot !== best.slot) {
-      await bot.equip(best, 'hand').catch(() => {});
+      console.log(`[Debug] Equipping ${best.name} to hand...`);
+      await bot.equip(best, 'hand').catch((err) => {
+        console.log(`[Debug] Equip failed: ${err.message}`);
+      });
+    } else {
+      console.log(`[Debug] Best tool already equipped.`);
     }
   }
 
