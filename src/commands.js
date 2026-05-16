@@ -259,9 +259,7 @@ function createCommandRunner(bot, options = {}) {
         entity.name,
         entity.displayName,
         entity.username,
-        entity.kind,
-        entity.mobType,
-        entity.objectType
+        entity.kind
       ].filter(Boolean).map(normalizeName);
 
       // Specific name match
@@ -280,7 +278,7 @@ function createCommandRunner(bot, options = {}) {
 
       // Some servers or versions might use these types
       // Only match if it's not a known object type
-      if (entityType !== 'object' && (entityType === 'hostile' || entityType === 'passive' || entity.mobType || entity.kind === 'hostile')) return true;
+      if (entityType !== 'object' && (entityType === 'hostile' || entityType === 'passive' || entity.kind === 'hostile')) return true;
 
       return false;
     });
@@ -734,8 +732,7 @@ function createCommandRunner(bot, options = {}) {
       const candidates = [
         entity.name,
         entity.displayName,
-        entity.kind,
-        entity.objectType
+        entity.kind
       ].filter(Boolean).map(normalizeName);
       
       return candidates.some((c) => c === normalized || c.includes(normalized));
