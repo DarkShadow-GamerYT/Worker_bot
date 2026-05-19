@@ -7,12 +7,14 @@ const tool = require('mineflayer-tool').plugin;
 const { config, validateConfig } = require('./config');
 const { createCommandRunner, parseArgs } = require('./commands');
 const { startHealthServer } = require('./health');
+const { createAutonomyManager } = require('./autonomy');
 
 let reconnectTimer = null;
 let shuttingDown = false;
 let currentBot = null;
 let antiAfkTimer = null;
 let donationTimer = null;
+let autonomyTimer = null;
 
 const runtimeStatus = {
   startedAt: new Date().toISOString(),
@@ -139,8 +141,11 @@ function startBot() {
   bot.loadPlugin(pathfinder);
   bot.loadPlugin(collectBlock);
 
+  const autonomyManager = createAutonomyManager(bot, config);
+
   const commandRunner = createCommandRunner(bot, {
-    pathfinderCanDig: config.pathfinderCanDig
+    pathfinderCanDig: config.pathfinderCanDig,
+    autonomyManager
   });
 
   bot.on('resourcePack', (url, hash) => {
@@ -179,6 +184,28 @@ function startBot() {
     }
 
     commandRunner.onSpawn();
+
+    if (autonomyTimer) clearInterval(autonomyTimer);
+    autonomyTimer = setInterval(() => {
+      autonomyManager.tick().catch((err) => {
+        console.error('[Autonomy Error]', err);
+      });
+    }, 1000);
+
+    bot.on('health', () => {
+      if (config.autonomy.autoEat && bot.food < 17) {
+        autonomyManager.tick().catch(() => {});
+      }
+    });
+
+    bot.on('entityHurt', (entity) => {
+      if (entity === bot.entity) {
+        if (config.autonomy.autoDefend) {
+          autonomyManager.tick().catch(() => {});
+        }
+      }
+    });
+
     runSpawnAutomation(bot).catch((error) => {
       updateStatus({ lastError: error.message });
       console.error('Spawn automation failed:', error.message);
@@ -221,6 +248,10 @@ function startBot() {
   bot.on('end', (reason) => {
     console.log('Disconnected:', reason || 'connection ended');
     if (currentBot === bot) currentBot = null;
+    if (autonomyTimer) {
+      clearInterval(autonomyTimer);
+      autonomyTimer = null;
+    }
     updateStatus({
       state: 'disconnected',
       lastDisconnect: String(reason || 'connection ended')
@@ -233,6 +264,7 @@ function startBot() {
     antiAfkTimer = setInterval(() => {
       if (!bot.entity || !bot.pathfinder) return;
       if (bot.pathfinder.isMoving()) return;
+      if (autonomyManager && autonomyManager.isActive() && !autonomyManager.isPaused()) return;
 
       // Small random movement
       const yaw = bot.entity.yaw + (Math.random() - 0.5) * 0.2;
@@ -258,6 +290,7 @@ function shutdown(signal) {
   if (reconnectTimer) clearTimeout(reconnectTimer);
   if (antiAfkTimer) clearInterval(antiAfkTimer);
   if (donationTimer) clearInterval(donationTimer);
+  if (autonomyTimer) clearInterval(autonomyTimer);
 
   if (currentBot) {
     currentBot.quit('Bot shutting down');

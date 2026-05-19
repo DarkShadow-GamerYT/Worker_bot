@@ -41,6 +41,7 @@ function sleep(ms) {
 }
 
 function createCommandRunner(bot, options = {}) {
+  const autonomyManager = options.autonomyManager;
   const state = {
     activeTask: null,
     attackTimer: null,
@@ -115,47 +116,61 @@ function createCommandRunner(bot, options = {}) {
     if (!block) return;
     
     const items = bot.inventory.items();
-    // Currently only handles pickaxes as that's the reported issue
-    const pickaxes = items.filter(i => i.name.includes('pickaxe'));
-    console.log(`[Debug] Found ${pickaxes.length} pickaxes in inventory: ${pickaxes.map(p => p.name).join(', ')}`);
+    let toolType = 'pickaxe';
+    if (block.name.includes('wood') || block.name.includes('log') || block.name.includes('stem') || block.name === 'crafting_table' || block.name.includes('chest')) {
+      toolType = 'axe';
+    } else if (block.name.includes('dirt') || block.name.includes('grass') || block.name.includes('sand') || block.name.includes('gravel') || block.name.includes('clay')) {
+      toolType = 'shovel';
+    }
     
-    if (pickaxes.length === 0) return;
+    const candidates = items.filter(i => i.name.includes(toolType));
+    console.log(`[Debug] Found ${candidates.length} ${toolType}s in inventory: ${candidates.map(p => p.name).join(', ')}`);
+    
+    if (candidates.length === 0) return;
 
     const tiers = ['netherite', 'diamond', 'iron', 'golden', 'stone', 'wooden'];
     
-    pickaxes.sort((a, b) => {
+    candidates.sort((a, b) => {
       const aTier = tiers.findIndex(t => a.name.includes(t));
       const bTier = tiers.findIndex(t => b.name.includes(t));
       
       if (aTier !== bTier) return (aTier === -1 ? 99 : aTier) - (bTier === -1 ? 99 : bTier);
       
-      // If same tier, prefer enchanted
-      const isEnchanted = (item) => {
-        // Detailed logging for NBT structure
-        if (item.nbt) {
-          console.log(`[Debug] Item ${item.name} has NBT. Keys: ${Object.keys(item.nbt.value || {}).join(', ')}`);
-        } else {
-          console.log(`[Debug] Item ${item.name} has no NBT`);
+      // If same tier, prefer efficiency or enchanted
+      const getEnchLevel = (item) => {
+        if (item.enchantments) {
+          const eff = item.enchantments.find(e => e.name === 'efficiency');
+          if (eff) return eff.lvl + 10;
+          return item.enchantments.length > 0 ? 1 : 0;
         }
-
-        if (!item.nbt || !item.nbt.value) return false;
+        
+        if (!item.nbt || !item.nbt.value) return 0;
         const val = item.nbt.value;
-        return Boolean(val.ench || val.Enchantments || (val.components && val.components.value['minecraft:enchantments']));
+        
+        const str = JSON.stringify(val).toLowerCase();
+        if (str.includes('efficiency')) {
+          // Regex to search for level in NBT structures
+          const match = str.match(/\"lvl\"\s*:\s*(\d+)/) || str.match(/\"id\"\s*:\s*\"minecraft:efficiency\"\s*,\s*\"lvl\"\s*:\s*(\d+)/);
+          if (match) return parseInt(match[1], 10) + 10;
+          return 11; // default efficiency bonus
+        }
+        
+        if (val.ench || val.Enchantments || (val.components && val.components.value)) {
+          return 1;
+        }
+        
+        return 0;
       };
 
-      const aEnch = isEnchanted(a) ? 1 : 0;
-      const bEnch = isEnchanted(b) ? 1 : 0;
-      
-      return bEnch - aEnch;
+      return getEnchLevel(b) - getEnchLevel(a);
     });
 
-    const best = pickaxes[0];
+    const best = candidates[0];
     console.log(`[Debug] Choosing best tool: ${best.name} (slot: ${best.slot})`);
     
     const inHand = bot.inventory.slots[bot.getEquipmentDestSlot('hand')];
     if (inHand) console.log(`[Debug] Currently in hand: ${inHand.name} (slot: ${inHand.slot})`);
     
-    // Check if we already have the best one equipped (by slot to be sure it's the exact same item)
     if (!inHand || inHand.name !== best.name || inHand.slot !== best.slot) {
       console.log(`[Debug] Equipping ${best.name} to hand...`);
       await bot.equip(best, 'hand').catch((err) => {
@@ -238,9 +253,16 @@ function createCommandRunner(bot, options = {}) {
     if (cancel && typeof task.cancel === 'function') {
       task.cancel();
     }
+
+    if (autonomyManager) {
+      autonomyManager.resume();
+    }
   }
 
   function setActiveTask(name, cancel) {
+    if (autonomyManager) {
+      autonomyManager.pause();
+    }
     clearActiveTask({ cancel: true });
     state.activeTask = { name, cancel };
   }
@@ -355,7 +377,7 @@ function createCommandRunner(bot, options = {}) {
   async function commandHelp(username, reply) {
     await reply(
       username,
-      'Commands: help, status, come, follow [player], stop, goto x y z, mine [count], place x y z, equip [slot], inv, drop [count], craft [count], sleep, wake, attack mob, say text, ride [entity], dismount'
+      'Commands: help, status, come, follow [player], stop, goto x y z, mine [count], place x y z, equip [slot], inv, drop [count], craft [count], sleep, wake, attack mob, say text, ride [entity], dismount, autonomy [start|stop|status]'
     );
   }
 
@@ -398,9 +420,12 @@ function createCommandRunner(bot, options = {}) {
   }
 
   async function commandStop(username, reply) {
+    if (autonomyManager) {
+      autonomyManager.stop();
+    }
     clearActiveTask({ cancel: true });
     stopPathing();
-    await reply(username, 'Stopped.');
+    await reply(username, 'Stopped all actions and autonomy.');
   }
 
   async function commandGoto(username, args, reply) {
@@ -827,6 +852,34 @@ function createCommandRunner(bot, options = {}) {
     await bot.dismount();
   }
 
+  async function commandAutonomy(username, args, reply) {
+    if (!autonomyManager) {
+      throw new Error('Autonomy manager is not initialized.');
+    }
+
+    const subCommand = (args[0] || '').toLowerCase();
+    if (subCommand === 'start' || subCommand === 'on' || subCommand === 'play') {
+      autonomyManager.start();
+      await reply(username, 'Autonomy survival mode started! I will now gather resources, progress tools, eat, and defend myself.');
+    } else if (subCommand === 'stop' || subCommand === 'off') {
+      autonomyManager.stop();
+      await reply(username, 'Autonomy survival mode stopped.');
+    } else if (subCommand === 'status') {
+      const active = autonomyManager.isActive();
+      const paused = autonomyManager.isPaused();
+      const action = autonomyManager.getCurrentAction();
+      await reply(username, `Autonomy status: active=${active}, paused=${paused}. Current action: ${action}`);
+    } else {
+      if (autonomyManager.isActive()) {
+        autonomyManager.stop();
+        await reply(username, 'Autonomy survival mode stopped.');
+      } else {
+        autonomyManager.start();
+        await reply(username, 'Autonomy survival mode started!');
+      }
+    }
+  }
+
   async function handle(username, commandName, args, reply) {
     ensureReady();
 
@@ -887,6 +940,9 @@ function createCommandRunner(bot, options = {}) {
       case 'unmount':
       case 'leave':
         return commandDismount(username, reply);
+      case 'autonomy':
+      case 'auto':
+        return commandAutonomy(username, args, reply);
       default:
         await reply(username, `Unknown command: ${commandName}. Try help.`);
         return undefined;

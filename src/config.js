@@ -60,6 +60,12 @@ const config = {
     enabled: parseBoolean(process.env.ANTI_AFK_ENABLED, true),
     intervalMs: parseNumber(process.env.ANTI_AFK_INTERVAL_MS, 30000)
   },
+  autonomy: {
+    enabledByDefault: parseBoolean(process.env.AUTONOMY_ENABLED_BY_DEFAULT, false),
+    autoEat: parseBoolean(process.env.AUTO_EAT_ENABLED, true),
+    autoDefend: parseBoolean(process.env.AUTO_DEFEND_ENABLED, true),
+    autoSleep: parseBoolean(process.env.AUTO_SLEEP_ENABLED, true)
+  },
   healthServer: {
     enabled: parseBoolean(process.env.HEALTH_SERVER_ENABLED, Boolean(process.env.PORT)),
     port: healthPort
