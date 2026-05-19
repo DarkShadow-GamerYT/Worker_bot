@@ -96,6 +96,7 @@ Type these in Minecraft chat. The default prefix is `!bot`.
 !bot dig stone 16
 !bot place dirt 100 65 -20
 !bot equip diamond_pickaxe hand
+!bot equip best
 !bot inventory
 !bot drop cobblestone 32
 !bot craft oak_planks 4
